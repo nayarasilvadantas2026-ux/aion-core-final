@@ -12,7 +12,6 @@ const state = {
   connected: false,
   banca: 0,
   pnl: 0,
-  active: false,
   latencia: 0,
   lastTick: null,
   logs: [],
@@ -22,21 +21,15 @@ let ws;
 let pingTime = Date.now();
 
 // ================= DERIV =================
-function connectDeriv() {
-  if (ws) ws.terminate();
-
+function connect() {
   ws = new WebSocket(
     `wss://ws.derivws.com/websockets/v3?app_id=${process.env.APP_ID}`
   );
 
   ws.on("open", () => {
-    console.log("🟢 DERIV CONNECTED");
-
-    ws.send(
-      JSON.stringify({
-        authorize: process.env.DERIV_TOKEN_DEMO,
-      })
-    );
+    ws.send(JSON.stringify({
+      authorize: process.env.DERIV_TOKEN_DEMO
+    }));
   });
 
   ws.on("message", (msg) => {
@@ -44,7 +37,6 @@ function connectDeriv() {
 
     if (data.msg_type === "authorize") {
       state.connected = true;
-
       ws.send(JSON.stringify({ balance: 1, subscribe: 1 }));
       ws.send(JSON.stringify({ ticks: "R_75", subscribe: 1 }));
     }
@@ -61,7 +53,7 @@ function connectDeriv() {
         msg: `${data.tick.symbol} ${data.tick.quote}`,
       });
 
-      if (state.logs.length > 20) state.logs.pop();
+      if (state.logs.length > 10) state.logs.pop();
     }
 
     if (data.msg_type === "time") {
@@ -69,10 +61,7 @@ function connectDeriv() {
     }
   });
 
-  ws.on("close", () => {
-    console.log("🔴 reconnecting...");
-    setTimeout(connectDeriv, 3000);
-  });
+  ws.on("close", () => setTimeout(connect, 3000));
 }
 
 setInterval(() => {
@@ -82,33 +71,85 @@ setInterval(() => {
   }
 }, 2000);
 
-connectDeriv();
+connect();
 
 // ================= API =================
 app.get("/api/state", (req, res) => {
   res.json(state);
 });
 
-// ================= FRONT =================
+// ================= DASHBOARD =================
 app.get("/", (req, res) => {
   res.send(`
-  <html style="background:#000;color:#0ff;font-family:monospace">
-  <h1>AION CORE CLEAN</h1>
-  <pre id="out">loading...</pre>
+<!DOCTYPE html>
+<html>
+<head>
+<title>AION CORE</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{margin:0;background:#05070d;color:#00f2ff;font-family:Arial}
+.header{padding:20px;text-align:center;font-size:28px;font-weight:bold}
+.card{margin:15px;padding:15px;background:#0b1220;border-radius:12px}
+.big{font-size:40px;font-weight:bold}
+.row{display:flex;justify-content:space-around}
+.green{color:#00ff88}
+.red{color:#ff4444}
+</style>
+</head>
 
-  <script>
-    async function load(){
-      const r = await fetch('/api/state');
-      const j = await r.json();
-      document.getElementById('out').innerText = JSON.stringify(j,null,2);
-    }
-    setInterval(load,1000);
-    load();
-  </script>
-  </html>
+<body>
+
+<div class="header">⚡ AION CORE DASHBOARD</div>
+
+<div class="card">
+  <div>STATUS: <span id="status">...</span></div>
+  <div>BALANCE</div>
+  <div class="big" id="banca">0</div>
+</div>
+
+<div class="card">
+  <div>LATÊNCIA: <span id="lat">0</span> ms</div>
+  <div>ÚLTIMO TICK:</div>
+  <div id="tick">--</div>
+</div>
+
+<div class="card">
+  <div>LOGS</div>
+  <div id="logs"></div>
+</div>
+
+<script>
+
+async function load(){
+  const r = await fetch('/api/state');
+  const d = await r.json();
+
+  document.getElementById('status').innerText =
+    d.connected ? "CONECTADO" : "DESCONECTANDO";
+
+  document.getElementById('banca').innerText =
+    Number(d.banca).toFixed(2);
+
+  document.getElementById('lat').innerText =
+    d.latencia;
+
+  document.getElementById('tick').innerText =
+    d.lastTick ? d.lastTick.quote : "--";
+
+  document.getElementById('logs').innerHTML =
+    d.logs.map(l => `<div>• ${l.time} - ${l.msg}</div>`).join('');
+}
+
+setInterval(load, 1000);
+load();
+
+</script>
+
+</body>
+</html>
   `);
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("🚀 RUNNING ON", PORT);
+  console.log("RUNNING", PORT);
 });
